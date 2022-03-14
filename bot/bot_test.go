@@ -1,12 +1,15 @@
 package bot
 
-import "testing"
-import "github.com/nlopes/slack"
+import (
+	"testing"
+
+	"github.com/slack-go/slack"
+)
 
 func TestHandleMessageIgnoreBotMessages(t *testing.T) {
 	bot := Bot{}
 
-	bot.handleMessage(&slack.MessageEvent{Msg: slack.Msg{BotID: "test"}})
+	bot.handleMessage(&slack.MessageEvent{Msg: slack.Msg{BotID: "test"}}, false)
 }
 
 func TestCanTellIfMessageAdressedToBotByIdWithCorrectSyntax(t *testing.T) {
@@ -75,17 +78,6 @@ func TestTrimBotNameAndIdFromMessage(t *testing.T) {
 
 	trimmedMessage := bot.trimBotNameInMessage("<@scrumpolice> sylvain it's you!!")
 	if trimmedMessage != "it's you!!" {
-		t.Fail()
-	}
-}
-
-func TestHandleConnectedSetsBotNameAndId(t *testing.T) {
-	bot := Bot{id: "scrumpolice",
-		name: "Sylvain"}
-
-	bot.handleConnected(&slack.ConnectedEvent{Info: &slack.Info{User: &slack.UserDetails{ID: "notscrumpolice", Name: "obiwan"}}})
-
-	if bot.id != "notscrumpolice" || bot.name != "obiwan" {
 		t.Fail()
 	}
 }

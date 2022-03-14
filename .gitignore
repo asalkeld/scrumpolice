@@ -6,3 +6,8 @@
 
 config.*.json
 !config.example.json
+
+scrumpolice
+.env
+.nitric/*
+.token

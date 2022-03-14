@@ -7,9 +7,6 @@
                               |_|
 ```
 
-[![Build Status](https://travis-ci.org/pastjean/scrumpolice.svg?branch=master)](https://travis-ci.org/pastjean/scrumpolice)
-[![Go Report Card](https://goreportcard.com/badge/github.com/pastjean/scrumpolice)](https://goreportcard.com/report/github.com/pastjean/scrumpolice)
-
 Scrum bot ask every member of your team for a scrum report then reports it to
 your team's channel at a predefined time.
 

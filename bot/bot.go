@@ -1,91 +1,57 @@
 package bot
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
-	"sync"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/nlopes/slack"
-	"github.com/pastjean/scrumpolice/scrum"
+	"github.com/asalkeld/scrumpolice/scrum"
+	"github.com/slack-go/slack"
 )
 
 var (
 	OutOfOfficeRegex, _ = regexp.Compile("^(.+) is out of office$")
 )
 
-type (
-	Bot struct {
-		slackBotRTM *slack.RTM
-		slackBotAPI *slack.Client
+type Bot struct {
+	slackBotAPI *slack.Client
 
-		userContextsMutex sync.Mutex
-		userContexts      map[string]BotContextHandler
+	scrum scrum.Service
 
-		scrum scrum.Service
+	name    string
+	iconURL string
+	id      string
 
-		name    string
-		iconURL string
-		id      string
-
-		logger *log.Logger
-	}
-)
+	logger *log.Logger
+}
 
 func New(slackApiClient *slack.Client, logger *log.Logger, scrum scrum.Service) *Bot {
-	slackBotRTM := slackApiClient.NewRTM()
-	go slackBotRTM.ManageConnection()
-
-	return &Bot{
-		slackBotAPI:  slackApiClient,
-		slackBotRTM:  slackBotRTM,
-		logger:       logger,
-		userContexts: map[string]BotContextHandler{},
-		iconURL:      "http://i.imgur.com/dzZvzXm.jpg",
-		scrum:        scrum,
+	b := &Bot{
+		slackBotAPI: slackApiClient,
+		logger:      logger,
+		iconURL:     "http://i.imgur.com/dzZvzXm.jpg",
+		scrum:       scrum,
+		name:        "scrumpolice",
+		id:          "B036NV2603Y",
 	}
+
+	return b
 }
 
-func (b *Bot) Run() {
-	go func() {
-		for msg := range b.slackBotRTM.IncomingEvents {
-			switch evt := msg.Data.(type) {
-			case *slack.MessageEvent:
-				go b.handleMessage(evt)
-			case *slack.InvalidAuthEvent:
-				go b.handleInvalidAuth(evt)
-			case *slack.ConnectedEvent:
-				go b.handleConnected(evt)
-			}
-		}
-	}()
-
-	select {}
-}
-
-func (b *Bot) handleMessage(event *slack.MessageEvent) {
-	if event.BotID != "" {
+func (b *Bot) handleMessage(event *slack.MessageEvent, isIM bool) {
+	if event.BotID != b.id {
+		b.logger.Println("handleMessage SKIPPING msg from bot ", event)
 		// Ignore the messages coming from other bots
 		return
 	}
 
-	isIM := false
-	switch event.Channel[0] {
-	case 'D':
-		isIM = true
-		// IM
-	case 'G':
-		// GROUP
-	default:
-		// ALL OTHER CHANNEL TYPES
-	}
-
-	eventText := strings.ToLower(event.Text)
-
 	if !b.HandleScrumMessage(event) {
 		return
 	}
+
+	eventText := strings.ToLower(event.Text)
 
 	// HANDLE GLOBAL PUBLIC COMMANDS HERE
 	if strings.Contains(eventText, ":wave:") {
@@ -93,12 +59,12 @@ func (b *Bot) handleMessage(event *slack.MessageEvent) {
 		return
 	}
 
-	if !isIM && !b.adressedToMe(eventText) {
+	adressedToMe := b.adressedToMe(eventText)
+	if !isIM && !adressedToMe {
 		return
 	}
 
 	// FROM HERE All Commands need to be adressed to me or handled in private conversations
-	adressedToMe := b.adressedToMe(eventText)
 	if !isIM && adressedToMe {
 		eventText = b.trimBotNameInMessage(eventText)
 	}
@@ -114,13 +80,23 @@ func (b *Bot) handleMessage(event *slack.MessageEvent) {
 		return
 	}
 
+	if strings.HasPrefix(eventText, "report") {
+		b.SendReport(event)
+		return
+	}
+
 	if eventText == "help" {
 		b.help(event)
 		return
 	}
 
 	if eventText == "tutorial" {
-		go b.tutorial(event)
+		b.tutorial(event)
+		return
+	}
+
+	if eventText == "members" {
+		b.members(event)
 		return
 	}
 
@@ -141,31 +117,23 @@ func (b *Bot) handleMessage(event *slack.MessageEvent) {
 
 	// Unrecognized message so let's help the user
 	b.unrecognizedMessage(event)
-	return
 }
 
 func (b *Bot) adressedToMe(msg string) bool {
+	fmt.Println("adressedToMe ", msg)
+	fmt.Println(b.id, " ", b.name)
 	return strings.HasPrefix(msg, strings.ToLower("<@"+b.id+">")) ||
 		strings.HasPrefix(msg, strings.ToLower(b.name))
 }
 
 func (b *Bot) trimBotNameInMessage(msg string) string {
+	fmt.Println("trimBotNameInMessage ", msg)
 	msg = strings.Replace(msg, strings.ToLower("<@"+b.id+">"), "", 1)
 	msg = strings.Replace(msg, strings.ToLower(b.name), "", 1)
 	msg = strings.Trim(msg, " :\n")
+	fmt.Println("trimBotNameInMessage ", msg)
 
 	return msg
-}
-
-func (b *Bot) handleInvalidAuth(event *slack.InvalidAuthEvent) {
-	b.logger.WithFields(log.Fields{
-		"event": event,
-	}).Fatalln("Invalid authentication credentials")
-}
-
-func (b *Bot) handleConnected(event *slack.ConnectedEvent) {
-	b.id = event.Info.User.ID
-	b.name = event.Info.User.Name
 }
 
 func (b *Bot) reactToEvent(event *slack.MessageEvent, reaction string) {
@@ -180,9 +148,24 @@ func (b *Bot) reactToEvent(event *slack.MessageEvent, reaction string) {
 	}
 }
 
+func (b *Bot) members(event *slack.MessageEvent) {
+
+}
+
+func (b *Bot) SendReport(event *slack.MessageEvent) {
+	teamName := strings.TrimSpace(strings.TrimPrefix(event.Text, "report"))
+
+	tc, err := b.scrum.GetTeamByName(teamName)
+	if err != nil {
+		b.logSlackRelatedError(event, err, "can't get team")
+	}
+	b.scrum.SendReportForTeam(tc)
+}
+
 func (b *Bot) sourceCode(event *slack.MessageEvent) {
-	params := slack.PostMessageParameters{AsUser: true}
-	_, _, err := b.slackBotAPI.PostMessage(event.Channel, "My source code is here <https://github.com/pastjean/scrumpolice>", params)
+	_, _, err := b.slackBotAPI.PostMessage(event.Channel,
+		slack.MsgOptionText("My source code is here <https://github.com/asalkeld/scrumpolice>", true),
+		slack.MsgOptionAsUser(true))
 	if err != nil {
 		b.logSlackRelatedError(event, err, "Fail to post message to slack.")
 		return
@@ -202,10 +185,10 @@ func (b *Bot) help(event *slack.MessageEvent) {
 			"- `i am back` or `i'm back`: mark current user as in office. MacOS smart quote can screw up with the `i'm back` command.",
 	}
 
-	params := slack.PostMessageParameters{AsUser: true}
-	params.Attachments = []slack.Attachment{message}
-
-	_, _, err := b.slackBotAPI.PostMessage(event.Channel, "Here's a list of supported commands", params)
+	_, _, err := b.slackBotAPI.PostMessage(event.Channel,
+		slack.MsgOptionText("Here's a list of supported commands", true),
+		slack.MsgOptionAsUser(true),
+		slack.MsgOptionAttachments(message))
 	if err != nil {
 		b.logSlackRelatedError(event, err, "Fail to post message to slack.")
 		return
@@ -214,53 +197,39 @@ func (b *Bot) help(event *slack.MessageEvent) {
 
 // This method sleeps to give a better feeling to the user. It should be use in a sub-routine.
 func (b *Bot) tutorial(event *slack.MessageEvent) {
-	params := slack.PostMessageParameters{AsUser: true}
-
 	b.slackBotAPI.PostMessage(event.Channel,
-		"*Hi there* :wave: You're new, aren't you? You want to know how I do thing? Here :golang:es!\n"+
-			"When you want to start a scrum report, just tell me `start` in a direct message :flag-dm:. _If you are part of more than one team, specify the team (I will ask you if you don't)_\n"+
+		slack.MsgOptionText("*Hi there* :wave: You want to know how I do things? Here :golang:es!\n"+
+			"When you want to start a scrum report, just tell me `start` in a direct message :flag-dm:.\n"+
 			"Then, I will ask you a couple of questions, and wait for your answers. Once you anwsered all the questions, you're done :white_check_mark:.\n"+
 			"I take care of the rest! :cop:\n"+
 			"When it's time :clock10:, I will post the scrum report for you and your friends in your team's channel :raised_hands:\n"+
 			"All you have to do now is read the report :book: (when you have the time, I don't want to rush you :scream:)\n"+
-			"That's all. Enjoy :beers:.",
-		params)
+			"That's all. Enjoy :beers:.", true),
+		slack.MsgOptionAsUser(true),
+	)
 }
 
 func (b *Bot) outOfOffice(event *slack.MessageEvent, userId string) {
-	params := slack.PostMessageParameters{AsUser: true}
+	params := slack.MsgOptionAsUser(true)
 	username := strings.TrimLeft(userId, "@")
 
-	user, err := b.slackBotAPI.GetUserInfo(username)
-	if err == nil {
-		username = user.Profile.DisplayName
-	}
+	b.scrum.AddToOutOfOffice(username)
 
-	teams := b.scrum.GetTeamsForUser(username)
-	if len(teams) == 0 {
-		b.logSlackRelatedError(event, err, "Fail to get user information.")
-		b.slackBotAPI.PostMessage(event.Channel, "Hmmmm, I couldn't find any user matching '"+username+"' in any team. Try again!", params)
-		return
-	}
-
-	for _, team := range teams {
-		b.scrum.AddToOutOfOffice(team, username)
-	}
 	if event.User == userId {
-		b.slackBotAPI.PostMessage(event.Channel, "I've marked you out of office in all your teams", params)
+		b.slackBotAPI.PostMessage(event.Channel, slack.MsgOptionText("I've marked you out of office in all your teams", true), params)
 		log.WithFields(log.Fields{
 			"user":   username,
 			"doneBy": username,
 		}).Info("User was marked out of office.")
 	} else {
-		b.slackBotAPI.PostMessage(event.Channel, "I've marked @"+username+" out of office in all of his teams", params)
+		b.slackBotAPI.PostMessage(event.Channel, slack.MsgOptionText("I've marked @"+username+" out of office in all of your peer's teams", true), params)
 
 		user, err := b.slackBotAPI.GetUserInfo(event.User)
 		if err != nil {
 			b.logSlackRelatedError(event, err, "Fail to get user information.")
 			return
 		}
-		b.slackBotAPI.PostMessage("@"+username, "You've been marked out of office by @"+user.Name+".", params)
+		b.slackBotAPI.PostMessage("@"+username, slack.MsgOptionText("You've been marked out of office by @"+user.Name+".", true), params)
 		log.WithFields(log.Fields{
 			"user":   userId,
 			"doneBy": user.Name,
@@ -269,72 +238,51 @@ func (b *Bot) outOfOffice(event *slack.MessageEvent, userId string) {
 }
 
 func (b *Bot) backInOffice(event *slack.MessageEvent) {
-	params := slack.PostMessageParameters{AsUser: true}
+	params := slack.MsgOptionAsUser(true)
 	user, err := b.slackBotAPI.GetUserInfo(event.User)
 	if err != nil {
 		b.logSlackRelatedError(event, err, "Fail to get user information.")
-		b.slackBotAPI.PostMessage(event.Channel, "Hmmmm, I couldn't find you. Try again!", params)
+		b.slackBotAPI.PostMessage(event.Channel, slack.MsgOptionText("Hmmmm, I couldn't find you. Try again!", true), params)
 		return
 	}
 	username := user.Name
 
-	teams := b.scrum.GetTeamsForUser(username)
-
-	for _, team := range teams {
-		b.scrum.RemoveFromOutOfOffice(team, username)
-	}
-	b.slackBotAPI.PostMessage(event.Channel, "I've marked you in office in all your teams. Welcome back!", params)
+	b.scrum.RemoveFromOutOfOffice(username)
+	b.slackBotAPI.PostMessage(event.Channel, slack.MsgOptionText("I've marked you in office in all your teams. Welcome back!", true), params)
 	log.WithFields(log.Fields{
-		"user": username,
+		"user":     event.User,
+		"username": event.Username,
 	}).Info("User was marked in office.")
 }
 
 func (b *Bot) unrecognizedMessage(event *slack.MessageEvent) {
 	log.WithFields(log.Fields{
-		"text": event.Text,
-		"user": event.Username,
+		"text":     event.Text,
+		"user":     event.User,
+		"username": event.Username,
 	}).Info("Received unrecognized message.")
-	params := slack.PostMessageParameters{AsUser: true}
+	params := slack.MsgOptionAsUser(true)
 
-	_, _, err := b.slackBotAPI.PostMessage(event.Channel, "I don't understand what you're trying to tell me, try `help`", params)
+	_, _, err := b.slackBotAPI.PostMessage(event.Channel, slack.MsgOptionText("I don't understand what you're trying to tell me, try `help`", true), params)
 	if err != nil {
 		b.logSlackRelatedError(event, err, "Fail to post message to slack.")
 		return
 	}
 }
 
-func (b *Bot) canQuitBotContextHandlerFunc(handler func(event *slack.MessageEvent) bool) BotContextHandler {
-	return b.canQuitBotContext(BotContextHandlerFunc(handler))
-}
-
-func (b *Bot) canQuitBotContext(handler BotContextHandler) BotContextHandler {
-	return BotContextHandlerFunc(func(event *slack.MessageEvent) bool {
-		if event.Text == "quit" {
-			b.slackBotAPI.PostMessage(event.Channel, "Action is canceled, if you wanna do anything else, just poke me, `help` is always available! :wave:", slack.PostMessageParameters{AsUser: true})
-			delete(b.userContexts, event.User)
-			return false
-		}
-
-		return handler.HandleMessage(event)
-	})
-}
-
-func (b *Bot) setUserContext(user string, context BotContextHandler) {
-	b.userContextsMutex.Lock()
-	b.userContexts[user] = context
-	b.userContextsMutex.Unlock()
-}
-
-func (b *Bot) unsetUserContext(user string) {
-	b.userContextsMutex.Lock()
-	delete(b.userContexts, user)
-	b.userContextsMutex.Unlock()
+func (b *Bot) logSlackEvent(event *slack.MessageEvent, logMessage string) {
+	b.logger.WithFields(log.Fields{
+		"text":     event.Text,
+		"user":     event.User,
+		"username": event.Username,
+	}).Info(logMessage)
 }
 
 func (b *Bot) logSlackRelatedError(event *slack.MessageEvent, err error, logMessage string) {
 	b.logger.WithFields(log.Fields{
-		"text":  event.Text,
-		"user":  event.Username,
-		"error": err,
+		"text":     event.Text,
+		"user":     event.User,
+		"username": event.Username,
+		"error":    err,
 	}).Error(logMessage)
 }

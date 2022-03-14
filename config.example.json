@@ -1,29 +1,13 @@
 {
-  "timezone": "America/Montreal",
-  "teams": [
-    {
-      "channel": "general",
-      "name": "L337",
-      "members": [
-        "fboutin2",
-        "lbourdages",
-        "pa",
-        "jo"
-      ],
-      "split_report": true,
-      "question_sets": [
-        {
-          "questions": [
-            "What did you do yesterday?",
-            "What will you do today?",
-            "Are you being blocked by someone for a review? who ? why ?",
-            "How will you dominate the world"
-          ],
-          "report_schedule_cron": "@every 30s",
-          "first_reminder_limit": "-8s",
-          "last_reminder_limit": "-3s"
-        }
-      ]
-    }
-  ]
+  "channel": "test-bot",
+  "name": "nitters",
+  "timezone": "Australia/Brisbane",
+  "members": ["Angus", "Dave"],
+  "splitReport": true,
+  "questions": [
+    "What did you do yesterday?",
+    "What will you do today?",
+    "Are you being blocked by someone for a review? who ? why ?"
+  ],
+  "reportScheduleCron": "@every 10min"
 }
