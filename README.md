@@ -14,6 +14,13 @@ your team's channel at a predefined time.
 
 # Usage
 
+Run the bot with a slack bot user token
+
+```sh
+echo xoxb-mytoken > .token
+nitric up -s aws
+```
+
 Create your configuration file:
 
 ```json
@@ -24,24 +31,17 @@ Create your configuration file:
       "channel": "themostaswesometeamchannel",
       "name": "L337 team",
       "members": [
-        "@gfreeman",
-        "@evance",
-        "@wbreen"
+        "gfreeman",
+        "evance",
+        "wbreen"
       ],
       "split_report": true,
-      "question_sets": [
-        {
-          "questions": [
-            "What did you do yesterday?",
-            "What will you do today?",
-            "Are you being blocked by someone for a review? who ? why ?",
-            "How will you dominate the world"
-          ],
-          "report_schedule_cron": "0 5 9 * * 1-5",
-          "first_reminder_limit": "-50m",
-          "last_reminder_limit": "-5m"
-        }
-      ]
+      "questions": [
+        "What did you do yesterday?",
+        "What will you do today?",
+        "Are you being blocked by someone for a review? who ? why ?",
+        "How will you dominate the world"
+      ],
     }
   ]
 }
@@ -49,21 +49,3 @@ Create your configuration file:
 
 `split_report`: whether to post each scrum entry as a separate message or post all scrum entries in the same message.
 
-Run the bot with a slack bot user token
-
-```sh
-SCRUMPOLICE_SLACK_TOKEN=xoxb-mytoken scrumpolice -config config.json
-```
-
-# Development
-
-Have a working go environment (since 1.8 just install go) otherwise you need the
-`$GOPATH` set and use that instead of `$HOME/go`.
-
-```sh
-go get github.com/pastjean/scrumpolice
-cd $HOME/go/src/github.com/pastjean/scrumpolice
-dep ensure
-# Run it
-SCRUMPOLICE_SLACK_TOKEN=xoxb-mytoken go run cmd/scrumpolice/scrumpolice.go -config config.example.json
-```

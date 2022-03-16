@@ -29,7 +29,7 @@ type Service interface {
 	AddToOutOfOffice(username string)
 	RemoveFromOutOfOffice(username string)
 
-	SendReportForTeam(tc *TeamConfig)
+	SendReportForTeam(tc *TeamConfig, sendTo string)
 }
 
 type service struct {
@@ -51,7 +51,7 @@ func (mod *service) postMessageToSlack(channel string, message string, params ..
 	}
 }
 
-func (mod *service) SendReportForTeam(tc *TeamConfig) {
+func (mod *service) SendReportForTeam(tc *TeamConfig, sendTo string) {
 	attachments := []slack.Attachment{}
 	didNotDoReport := []string{}
 	outOfOffice := []string{}
@@ -62,7 +62,6 @@ func (mod *service) SendReportForTeam(tc *TeamConfig) {
 	}
 
 	for _, member := range members {
-		fmt.Println(member)
 		if member.OutOfOffice {
 			outOfOffice = append(outOfOffice, member.User)
 		} else if len(member.Answers) == 0 {
@@ -115,16 +114,16 @@ func (mod *service) SendReportForTeam(tc *TeamConfig) {
 	}
 
 	if tc.SplitReport {
-		mod.postMessageToSlack(tc.Channel, ":parrotcop: Alrighty! Here's the scrum report for today!", SlackParams)
+		mod.postMessageToSlack(sendTo, ":parrotcop: Alrighty! Here's the scrum report for today!", SlackParams)
 		for i := 0; i < len(attachments); i++ {
-			mod.postMessageToSlack(tc.Channel, "*Scrum by:*", SlackParams, slack.MsgOptionAttachments(attachments[i]))
+			mod.postMessageToSlack(sendTo, "*Scrum by:*", SlackParams, slack.MsgOptionAttachments(attachments[i]))
 		}
 	} else {
-		mod.postMessageToSlack(tc.Channel, ":parrotcop: Alrighty! Here's the scrum report for today!", SlackParams, slack.MsgOptionAttachments(attachments...))
+		mod.postMessageToSlack(sendTo, ":parrotcop: Alrighty! Here's the scrum report for today!", SlackParams, slack.MsgOptionAttachments(attachments...))
 	}
 
 	if len(didNotDoReport) > 0 {
-		mod.postMessageToSlack(tc.Channel, fmt.Sprintln("And lastly we should take a little time to shame", didNotDoReport), SlackParams)
+		mod.postMessageToSlack(sendTo, fmt.Sprintln("And lastly we should take a little time to shame", didNotDoReport), SlackParams)
 	}
 
 	log.WithFields(log.Fields{

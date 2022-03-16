@@ -20,9 +20,8 @@ type Bot struct {
 
 	scrum scrum.Service
 
-	name    string
-	iconURL string
-	id      string
+	name string
+	id   string
 
 	logger *log.Logger
 }
@@ -31,23 +30,22 @@ func New(slackApiClient *slack.Client, logger *log.Logger, scrum scrum.Service) 
 	b := &Bot{
 		slackBotAPI: slackApiClient,
 		logger:      logger,
-		iconURL:     "http://i.imgur.com/dzZvzXm.jpg",
 		scrum:       scrum,
 		name:        "scrumpolice",
-		id:          "B036NV2603Y",
+		id:          "u037kbftcgy",
 	}
 
 	return b
 }
 
 func (b *Bot) handleMessage(event *slack.MessageEvent, isIM bool) {
-	if event.BotID != b.id {
+	if event.BotID != "" {
+		if strings.HasPrefix(event.Text, "Scrum report started") {
+			// this is from me, get the user id
+			b.logger.Println("this looks like my message, user ", event.User, " botID ", event.BotID)
+		}
 		b.logger.Println("handleMessage SKIPPING msg from bot ", event)
 		// Ignore the messages coming from other bots
-		return
-	}
-
-	if !b.HandleScrumMessage(event) {
 		return
 	}
 
@@ -60,7 +58,12 @@ func (b *Bot) handleMessage(event *slack.MessageEvent, isIM bool) {
 	}
 
 	adressedToMe := b.adressedToMe(eventText)
+	fmt.Println("addressed to me? ", adressedToMe)
 	if !isIM && !adressedToMe {
+		return
+	}
+
+	if !b.HandleScrumMessage(event) {
 		return
 	}
 
@@ -80,8 +83,15 @@ func (b *Bot) handleMessage(event *slack.MessageEvent, isIM bool) {
 		return
 	}
 
+	if strings.HasPrefix(eventText, "report-dm") {
+		teamName := strings.TrimSpace(strings.TrimPrefix(event.Text, "report-dm"))
+		b.sendReportDm(event, teamName, "@"+event.User)
+		return
+	}
+
 	if strings.HasPrefix(eventText, "report") {
-		b.SendReport(event)
+		teamName := strings.TrimSpace(strings.TrimPrefix(event.Text, "report"))
+		b.sendReport(event, teamName)
 		return
 	}
 
@@ -92,11 +102,6 @@ func (b *Bot) handleMessage(event *slack.MessageEvent, isIM bool) {
 
 	if eventText == "tutorial" {
 		b.tutorial(event)
-		return
-	}
-
-	if eventText == "members" {
-		b.members(event)
 		return
 	}
 
@@ -148,18 +153,22 @@ func (b *Bot) reactToEvent(event *slack.MessageEvent, reaction string) {
 	}
 }
 
-func (b *Bot) members(event *slack.MessageEvent) {
-
-}
-
-func (b *Bot) SendReport(event *slack.MessageEvent) {
-	teamName := strings.TrimSpace(strings.TrimPrefix(event.Text, "report"))
-
+func (b *Bot) sendReport(event *slack.MessageEvent, teamName string) {
 	tc, err := b.scrum.GetTeamByName(teamName)
 	if err != nil {
 		b.logSlackRelatedError(event, err, "can't get team")
 	}
-	b.scrum.SendReportForTeam(tc)
+
+	b.scrum.SendReportForTeam(tc, tc.Channel)
+}
+
+func (b *Bot) sendReportDm(event *slack.MessageEvent, teamName, sendTo string) {
+	tc, err := b.scrum.GetTeamByName(teamName)
+	if err != nil {
+		b.logSlackRelatedError(event, err, "can't get team")
+	}
+
+	b.scrum.SendReportForTeam(tc, sendTo)
 }
 
 func (b *Bot) sourceCode(event *slack.MessageEvent) {
@@ -180,6 +189,8 @@ func (b *Bot) help(event *slack.MessageEvent) {
 			"- `tutorial`: explains how the scrum police works. Try it!\n" +
 			"- `start`: starts a scrum for a team and a specific set of questions, defaults to your only team if you got only one, and only questions set if there's only one on the team you chose\n" +
 			"- `restart`: restart your last done scrum, if it wasn't posted\n" +
+			"- `report`: send the report to the configured channel\n" +
+			"- `report-dm`: scrumpolice will direct message you the report to check\n" +
 			"- `out of office`: mark current user as out of office (until `i'm back` is used)\n" +
 			"- `[user] is out of office`: mark the specified user as out of office (until he or she uses `i'm back`)\n" +
 			"- `i am back` or `i'm back`: mark current user as in office. MacOS smart quote can screw up with the `i'm back` command.",

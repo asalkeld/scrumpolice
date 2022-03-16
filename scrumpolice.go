@@ -14,12 +14,6 @@ import (
 )
 
 const (
-	header = "                                           _ _\n" +
-		" ___  ___ _ __ _   _ _ __ ___  _ __   ___ | (_) ___ ___\n" +
-		"/ __|/ __| '__| | | | '_ ` _ \\| '_ \\ / _ \\| | |/ __/ _ \\\n" +
-		"\\__ \\ (__| |  | |_| | | | | | | |_) | (_) | | | (_|  __/\n" +
-		"|___/\\___|_|   \\__,_|_| |_| |_| .__/ \\___/|_|_|\\___\\___|\n" +
-		"                              |_|"
 	Version = "0.0.1"
 )
 
@@ -27,7 +21,6 @@ const (
 var slackBotToken string
 
 func main() {
-	fmt.Println(header)
 	fmt.Println("Version", Version)
 	fmt.Println("")
 
