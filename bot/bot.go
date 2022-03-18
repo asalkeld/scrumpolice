@@ -149,18 +149,14 @@ func (b *Bot) handleMessage(event *slack.MessageEvent, isIM bool) {
 }
 
 func (b *Bot) adressedToMe(msg string) bool {
-	fmt.Println("adressedToMe ", msg)
-	fmt.Println(b.id, " ", b.name)
 	return strings.HasPrefix(msg, strings.ToLower("<@"+b.id+">")) ||
 		strings.HasPrefix(msg, strings.ToLower(b.name))
 }
 
 func (b *Bot) trimBotNameInMessage(msg string) string {
-	fmt.Println("trimBotNameInMessage ", msg)
 	msg = strings.Replace(msg, strings.ToLower("<@"+b.id+">"), "", 1)
 	msg = strings.Replace(msg, strings.ToLower(b.name), "", 1)
 	msg = strings.Trim(msg, " :\n")
-	fmt.Println("trimBotNameInMessage ", msg)
 
 	return msg
 }
