@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -13,6 +14,13 @@ import (
 
 var (
 	OutOfOfficeRegex, _ = regexp.Compile("^(.+) is out of office$")
+	githubMessages      = []string{
+		"Pull request opened by",
+		"Pull request ready for review by",
+		"Pull request merged by",
+		"New issue created by",
+		"Issue closed by",
+	}
 )
 
 type Bot struct {
@@ -32,7 +40,7 @@ func New(slackApiClient *slack.Client, logger *log.Logger, scrum scrum.Service) 
 		logger:      logger,
 		scrum:       scrum,
 		name:        "scrumpolice",
-		id:          "u037kbftcgy",
+		id:          "",
 	}
 
 	return b
@@ -40,9 +48,18 @@ func New(slackApiClient *slack.Client, logger *log.Logger, scrum scrum.Service) 
 
 func (b *Bot) handleMessage(event *slack.MessageEvent, isIM bool) {
 	if event.BotID != "" {
-		if strings.HasPrefix(event.Text, "Scrum report started") {
-			// this is from me, get the user id
-			b.logger.Println("this looks like my message, user ", event.User, " botID ", event.BotID)
+		if b.id == "" && strings.HasPrefix(event.Text, "Scrum report started") {
+			b.id = event.User
+		}
+		if b.id == event.User {
+			// ignore my own messages
+			return
+		}
+		for _, ghm := range githubMessages {
+			if strings.Contains(event.Text, ghm) {
+				b.handleGitHubEvent(event)
+				return
+			}
 		}
 		b.logger.Println("handleMessage SKIPPING msg from bot ", event)
 		// Ignore the messages coming from other bots
@@ -58,14 +75,6 @@ func (b *Bot) handleMessage(event *slack.MessageEvent, isIM bool) {
 	}
 
 	adressedToMe := b.adressedToMe(eventText)
-	fmt.Println("addressed to me? ", adressedToMe)
-	if !isIM && !adressedToMe {
-		return
-	}
-
-	if !b.HandleScrumMessage(event) {
-		return
-	}
 
 	// FROM HERE All Commands need to be adressed to me or handled in private conversations
 	if !isIM && adressedToMe {
@@ -74,6 +83,10 @@ func (b *Bot) handleMessage(event *slack.MessageEvent, isIM bool) {
 
 	// From here on i only care of messages that were clearly adressed to me so i'll just get out
 	if !adressedToMe && !isIM {
+		return
+	}
+
+	if !b.HandleScrumMessage(event) {
 		return
 	}
 
@@ -92,6 +105,17 @@ func (b *Bot) handleMessage(event *slack.MessageEvent, isIM bool) {
 	if strings.HasPrefix(eventText, "report") {
 		teamName := strings.TrimSpace(strings.TrimPrefix(event.Text, "report"))
 		b.sendReport(event, teamName)
+		return
+	}
+
+	if strings.HasPrefix(eventText, "github-user") {
+		githubUser := strings.TrimSpace(strings.TrimPrefix(event.Text, "github-user"))
+		b.githubUser(event, githubUser)
+		return
+	}
+
+	if eventText == "teamlist" {
+		b.teamlist(event)
 		return
 	}
 
@@ -171,6 +195,39 @@ func (b *Bot) sendReportDm(event *slack.MessageEvent, teamName, sendTo string) {
 	b.scrum.SendReportForTeam(tc, sendTo)
 }
 
+func (b *Bot) githubUser(event *slack.MessageEvent, githubUser string) {
+	user, err := b.slackBotAPI.GetUserInfo(event.User)
+	if err != nil {
+		b.logSlackRelatedError(event, err, "Fail to get user information.")
+		return
+	}
+
+	us := b.scrum.GetUserState(user.Profile.DisplayName)
+	us.GithubUser = githubUser
+	b.scrum.SaveUserState(us)
+	if err != nil {
+		b.logSlackRelatedError(event, err, "Fail to save user information.")
+		return
+	}
+	_, _, err = b.slackBotAPI.PostMessage("@"+event.User,
+		slack.MsgOptionText("Thank you! I'll now start listening for issues and pull-requests to place in your scrum report", true),
+		slack.MsgOptionAsUser(true))
+	if err != nil {
+		b.logSlackRelatedError(event, err, "Fail to post message to slack.")
+		return
+	}
+}
+
+func (b *Bot) handleGitHubEvent(event *slack.MessageEvent) {
+	data, err := json.MarshalIndent(event, " ", " ")
+	if err != nil {
+		b.logger.Info(err)
+		b.logger.Info(event)
+	} else {
+		b.logger.Info(string(data))
+	}
+}
+
 func (b *Bot) sourceCode(event *slack.MessageEvent) {
 	_, _, err := b.slackBotAPI.PostMessage(event.Channel,
 		slack.MsgOptionText("My source code is here <https://github.com/asalkeld/scrumpolice>", true),
@@ -178,6 +235,24 @@ func (b *Bot) sourceCode(event *slack.MessageEvent) {
 	if err != nil {
 		b.logSlackRelatedError(event, err, "Fail to post message to slack.")
 		return
+	}
+}
+
+func (b *Bot) teamlist(event *slack.MessageEvent) {
+	teams, err := b.scrum.GetAllTeams()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	output := []string{}
+	for _, team := range teams {
+		output = append(output, team.Name)
+	}
+	_, _, err = b.slackBotAPI.PostMessage(event.Channel,
+		slack.MsgOptionText("The configured teams are: "+strings.Join(output, ", "), true),
+		slack.MsgOptionAsUser(true))
+	if err != nil {
+		fmt.Println(err)
 	}
 }
 
@@ -189,8 +264,10 @@ func (b *Bot) help(event *slack.MessageEvent) {
 			"- `tutorial`: explains how the scrum police works. Try it!\n" +
 			"- `start`: starts a scrum for a team and a specific set of questions, defaults to your only team if you got only one, and only questions set if there's only one on the team you chose\n" +
 			"- `restart`: restart your last done scrum, if it wasn't posted\n" +
-			"- `report`: send the report to the configured channel\n" +
-			"- `report-dm`: scrumpolice will direct message you the report to check\n" +
+			"- `teamlist`: list the available teams\n" +
+			"- `report <teamName>`: send the report to the configured channel\n" +
+			"- `report-dm <teamName>`: scrumpolice will direct message you the report to check\n" +
+			"- `github-user <github username>`: scrumpolice will gather github activity for your report\n" +
 			"- `out of office`: mark current user as out of office (until `i'm back` is used)\n" +
 			"- `[user] is out of office`: mark the specified user as out of office (until he or she uses `i'm back`)\n" +
 			"- `i am back` or `i'm back`: mark current user as in office. MacOS smart quote can screw up with the `i'm back` command.",

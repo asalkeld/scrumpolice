@@ -4,11 +4,14 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"github.com/asalkeld/scrumpolice/bot"
 	"github.com/asalkeld/scrumpolice/scrum"
 	"github.com/nitrictech/go-sdk/faas"
 	"github.com/nitrictech/go-sdk/resources"
+	"github.com/robfig/cron"
 	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 )
@@ -35,11 +38,38 @@ func main() {
 	ss := scrum.NewService(sc, slackAPIClient)
 	b := bot.New(slackAPIClient, logger, ss)
 
-	resources.NewSchedule("send reminders", "@every 5mins", func(ec *faas.EventContext, next faas.EventHandler) (*faas.EventContext, error) {
+	err := resources.NewSchedule("sendReport", "30 minutes", func(ec *faas.EventContext, next faas.EventHandler) (*faas.EventContext, error) {
 		fmt.Println("got scheduled event ", string(ec.Request.Data()))
+
+		sc.ReloadAndDistributeChange()
+		for _, tc := range sc.Config().Teams {
+			loc, err := time.LoadLocation(strings.TrimSpace(tc.Timezone))
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+
+			//TODO when it changes day (midnight) clear everyones answers
+			//...
+
+			now := time.Now().In(loc)
+			lastCheck := now.Add(-30 * time.Minute)
+			c, err := cron.ParseStandard(tc.ReportScheduleCron)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			nextRun := c.Next(lastCheck)
+			if nextRun.Before(now) && nextRun.After(lastCheck) {
+				fmt.Println("run report now!")
+			}
+		}
 
 		return next(ec)
 	})
+	if err != nil {
+		log.Fatalln(err)
+	}
 
 	sc.ReloadAndDistributeChange()
 
@@ -51,7 +81,7 @@ func main() {
 	spApi.Get("/config/:name", sc.GetHandler)
 	spApi.Put("/config/:name", sc.PutHandler)
 
-	err := resources.Run()
+	err = resources.Run()
 	if err != nil {
 		panic(err)
 	}

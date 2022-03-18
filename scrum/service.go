@@ -19,6 +19,7 @@ var SlackParams = func() slack.MsgOption {
 }()
 
 type Service interface {
+	GetAllTeams() ([]*TeamConfig, error)
 	GetTeamByName(team string) (*TeamConfig, error)
 	GetTeamForUser(username string) *TeamConfig
 	GetAllTeamMembers(team string) ([]*UserState, error)

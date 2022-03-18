@@ -16,6 +16,7 @@ type Config struct {
 
 type UserState struct {
 	User        string            `json:"user"`
+	GithubUser  string            `json:"githubUser"`
 	OutOfOffice bool              `json:"outOfOffice"`
 	Started     bool              `json:"started"`
 	Skipped     bool              `json:"skipped"`
