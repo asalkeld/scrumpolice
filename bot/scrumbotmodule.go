@@ -185,6 +185,10 @@ func (b *Bot) startScrum(event *slack.MessageEvent, isSkipped bool) bool {
 			now = now.In(loc)
 		}
 		yesterday := now.Add(-24 * time.Hour)
+		if now.Weekday() == time.Monday {
+			// need to include Friday's changes
+			yesterday = now.Add(-3 * 24 * time.Hour)
+		}
 
 		gitItems, err := b.WorkItemsForUser(us.GithubUser, yesterday)
 		if err != nil {
