@@ -63,7 +63,7 @@ func (sc *store) ReloadAndDistributeChange() {
 	sc.config = &Config{Teams: []TeamConfig{}}
 	for _, doc := range results.Documents {
 		tc := &TeamConfig{}
-		err := grpcSafeDecode(doc, tc)
+		err := decodeWithJsonTags(doc, tc)
 		if err != nil {
 			log.Default().Println(err)
 			continue
@@ -77,29 +77,7 @@ func (sc *store) ReloadAndDistributeChange() {
 	}
 }
 
-func grpcSafeFix(inputMap map[string]interface{}) map[string]interface{} {
-	for k, v := range inputMap {
-		switch vv := v.(type) {
-		case []string:
-			is := []interface{}{}
-			for _, s := range vv {
-				is = append(is, s)
-			}
-			inputMap[k] = is
-		case map[string]interface{}:
-			inputMap[k] = grpcSafeFix(vv)
-		case map[string]string:
-			im := map[string]interface{}{}
-			for k, s := range vv {
-				im[k] = s
-			}
-			inputMap[k] = im
-		}
-	}
-	return inputMap
-}
-
-func grpcSafeDecode(input interface{}, output interface{}) error {
+func decodeWithJsonTags(input interface{}, output interface{}) error {
 	config := &mapstructure.DecoderConfig{
 		Metadata:    nil,
 		ErrorUnused: true,
@@ -130,11 +108,10 @@ func (sc *store) PostHandler(ctx *faas.HttpContext, next faas.HttpHandler) (*faa
 	// for storage, future iterations of the go-sdk may include direct interface{} storage as well
 	storeMap := make(map[string]interface{})
 
-	err := grpcSafeDecode(store, &storeMap)
+	err := decodeWithJsonTags(store, &storeMap)
 	if err != nil {
 		return common.HttpResponse(ctx, "error decoding store document :"+err.Error(), 400)
 	}
-	storeMap = grpcSafeFix(storeMap)
 
 	if err := teamCol.Doc(store.Name).Set(storeMap); err != nil {
 		return common.HttpResponse(ctx, "error writing store document :"+err.Error(), 400)
@@ -216,11 +193,10 @@ func (sc *store) PutHandler(ctx *faas.HttpContext, next faas.HttpHandler) (*faas
 		// Convert the document to a map[string]interface{}
 		// for storage, future iterations of the go-sdk may include direct interface{} storage as well
 		storeMap := make(map[string]interface{})
-		err := grpcSafeDecode(store, &storeMap)
+		err := decodeWithJsonTags(store, &storeMap)
 		if err != nil {
 			return common.HttpResponse(ctx, "error decoding store document", 400)
 		}
-		storeMap = grpcSafeFix(storeMap)
 
 		if err := teamCol.Doc(id).Set(storeMap); err != nil {
 			return common.HttpResponse(ctx, "error writing store document:"+err.Error(), 400)

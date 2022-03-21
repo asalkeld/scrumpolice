@@ -197,7 +197,7 @@ func (m *service) GetAllTeams() ([]*TeamConfig, error) {
 	all := []*TeamConfig{}
 	for _, doc := range results.Documents {
 		tc := &TeamConfig{}
-		err = grpcSafeDecode(doc.Content(), tc)
+		err = decodeWithJsonTags(doc.Content(), tc)
 		if err != nil {
 			return nil, err
 		}
@@ -212,7 +212,7 @@ func (m *service) GetTeamByName(teamName string) (*TeamConfig, error) {
 		return nil, err
 	}
 	tc := &TeamConfig{}
-	err = grpcSafeDecode(doc.Content(), tc)
+	err = decodeWithJsonTags(doc.Content(), tc)
 	return tc, err
 }
 
@@ -226,7 +226,7 @@ func (m *service) GetUserState(username string) *UserState {
 		us.Answers = map[string]string{}
 		return us
 	}
-	err = grpcSafeDecode(doc.Content(), us)
+	err = decodeWithJsonTags(doc.Content(), us)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -243,11 +243,10 @@ func (m *service) GetQuestionsForTeam(team string) []string {
 
 func (m *service) SaveUserState(us *UserState) error {
 	userStateMap := map[string]interface{}{}
-	err := grpcSafeDecode(us, &userStateMap)
+	err := decodeWithJsonTags(us, &userStateMap)
 	if err != nil {
 		return err
 	}
-	userStateMap = grpcSafeFix(userStateMap)
 
 	return userStateCol.Doc(us.User).Set(userStateMap)
 }
