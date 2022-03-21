@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asalkeld/scrumpolice/common"
 	"github.com/asalkeld/scrumpolice/scrum"
 	log "github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
@@ -53,6 +54,7 @@ func (b *Bot) restartScrum(event *slack.MessageEvent) bool {
 		return false
 	}
 	us.Answers = map[string]string{}
+	us.LastAnswerDate = ""
 	us.Started = false
 	b.scrum.SaveUserState(us)
 
@@ -137,8 +139,15 @@ func (b *Bot) startScrum(event *slack.MessageEvent, isSkipped bool) bool {
 		return false
 	}
 
+	today, err := common.ToDay(tc.Timezone)
+	if err != nil {
+		b.logSlackRelatedError(event, err, "Fail to get current date.")
+		return false
+	}
+
 	if isSkipped {
 		us.Answers = map[string]string{}
+		us.LastAnswerDate = today
 		us.Started = false
 		us.Skipped = true
 
@@ -154,6 +163,7 @@ func (b *Bot) startScrum(event *slack.MessageEvent, isSkipped bool) bool {
 	}
 
 	us.Answers = map[string]string{}
+	us.LastAnswerDate = today
 	us.Started = true
 	us.Skipped = false
 	err = b.scrum.SaveUserState(us)

@@ -15,12 +15,13 @@ type Config struct {
 }
 
 type UserState struct {
-	User        string            `json:"user"`
-	GithubUser  string            `json:"githubUser"`
-	OutOfOffice bool              `json:"outOfOffice"`
-	Started     bool              `json:"started"`
-	Skipped     bool              `json:"skipped"`
-	Answers     map[string]string `json:"answers"`
+	User           string            `json:"user"`
+	GithubUser     string            `json:"githubUser"`
+	OutOfOffice    bool              `json:"outOfOffice"`
+	Started        bool              `json:"started"`
+	Skipped        bool              `json:"skipped"`
+	LastAnswerDate string            `json:"lastAnswerDate"`
+	Answers        map[string]string `json:"answers"`
 }
 
 type Report struct {

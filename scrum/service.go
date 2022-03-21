@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/asalkeld/scrumpolice/common"
 	colorful "github.com/lucasb-eyer/go-colorful"
 	"github.com/nitrictech/go-sdk/api/documents"
 	"github.com/nitrictech/go-sdk/resources"
@@ -61,11 +62,24 @@ func (mod *service) SendReportForTeam(tc *TeamConfig, sendTo string) {
 	if err != nil {
 		fmt.Println(err)
 	}
+	today, err := common.ToDay(tc.Timezone)
+	if err != nil {
+		fmt.Println(err)
+		today = ""
+	}
 
 	for _, member := range members {
+		answers := member.Answers
+		if len(answers) > 0 {
+			// don't keep reusing previous answers.
+			if member.LastAnswerDate != "" && member.LastAnswerDate != today {
+				answers = map[string]string{}
+			}
+		}
+
 		if member.OutOfOffice {
 			outOfOffice = append(outOfOffice, member.User)
-		} else if len(member.Answers) == 0 {
+		} else if len(answers) == 0 {
 			didNotDoReport = append(didNotDoReport, "@"+member.User)
 		} else if member.Skipped {
 			attachment := slack.Attachment{
@@ -78,7 +92,7 @@ func (mod *service) SendReportForTeam(tc *TeamConfig, sendTo string) {
 		} else {
 			message := ""
 			for idx, q := range tc.Questions {
-				message += q + "\n" + member.Answers[q]
+				message += q + "\n" + answers[q]
 
 				if idx < len(tc.Questions)-1 {
 					message += "\n\n"
