@@ -4,14 +4,10 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
-	"time"
 
 	"github.com/asalkeld/scrumpolice/bot"
-	"github.com/asalkeld/scrumpolice/common"
 	"github.com/asalkeld/scrumpolice/scrum"
-	"github.com/nitrictech/go-sdk/faas"
 	"github.com/nitrictech/go-sdk/resources"
-	"github.com/robfig/cron"
 	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 )
@@ -35,37 +31,12 @@ func main() {
 	slackAPIClient := slack.New(slackBotToken)
 	spApi := resources.NewApi("scrumpolice")
 	sc := scrum.NewConfig()
-	ss := scrum.NewService(sc, slackAPIClient)
-	b := bot.New(slackAPIClient, logger, ss)
-
-	err := resources.NewSchedule("sendReport", "30 minutes", func(ec *faas.EventContext, next faas.EventHandler) (*faas.EventContext, error) {
-		fmt.Println("got scheduled event ", string(ec.Request.Data()))
-
-		sc.ReloadAndDistributeChange()
-		for _, tc := range sc.Config().Teams {
-			now, err := common.NowWithLocation(tc.Timezone)
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-
-			lastCheck := now.Add(-30 * time.Minute)
-			c, err := cron.ParseStandard(tc.ReportScheduleCron)
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-			nextRun := c.Next(lastCheck)
-			if nextRun.Before(*now) && nextRun.After(lastCheck) {
-				fmt.Println("run report now!")
-			}
-		}
-
-		return next(ec)
-	})
+	ss, err := scrum.NewService(sc, slackAPIClient)
 	if err != nil {
-		log.Fatalln(err)
+		panic(err)
 	}
+
+	b := bot.New(slackAPIClient, logger, ss)
 
 	sc.ReloadAndDistributeChange()
 

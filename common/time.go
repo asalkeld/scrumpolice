@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const DateFormat = "2006-01-02"
+
 func NowWithLocation(tz string) (*time.Time, error) {
 	loc, err := time.LoadLocation(strings.TrimSpace(tz))
 	if err != nil {
@@ -22,5 +24,5 @@ func ToDay(tz string) (string, error) {
 		return "", err
 	}
 
-	return n.Format("2006-01-02"), nil
+	return n.Format(DateFormat), nil
 }

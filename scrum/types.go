@@ -7,6 +7,7 @@ type TeamConfig struct {
 	Questions          []string `json:"questions"`
 	ReportScheduleCron string   `json:"reportScheduleCron"`
 	Timezone           string   `json:"timezone"`
+	LastSendDate       string   `json:"lastSendDate"`
 	SplitReport        bool     `json:"splitReport"`
 }
 
@@ -22,10 +23,4 @@ type UserState struct {
 	Skipped        bool              `json:"skipped"`
 	LastAnswerDate string            `json:"lastAnswerDate"`
 	Answers        map[string]string `json:"answers"`
-}
-
-type Report struct {
-	Team    string            `json:"team"`
-	Date    string            `json:"date"`
-	Answers map[string]string `json:"answers"`
 }

@@ -1,12 +1,13 @@
 package scrum
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/asalkeld/scrumpolice/common"
-	colorful "github.com/lucasb-eyer/go-colorful"
 	"github.com/nitrictech/go-sdk/api/documents"
+	"github.com/nitrictech/go-sdk/faas"
 	"github.com/nitrictech/go-sdk/resources"
 	log "github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
@@ -24,6 +25,7 @@ type Service interface {
 	GetTeamByName(team string) (*TeamConfig, error)
 	GetTeamForUser(username string) *TeamConfig
 	GetAllTeamMembers(team string) ([]*UserState, error)
+	SaveTeamConfig(tc *TeamConfig) error
 
 	GetUserState(username string) *UserState
 	SaveUserState(us *UserState) error
@@ -31,7 +33,8 @@ type Service interface {
 	AddToOutOfOffice(username string)
 	RemoveFromOutOfOffice(username string)
 
-	SendReportForTeam(tc *TeamConfig, sendTo string)
+	SendReportForTeam(tc *TeamConfig, sendTo string) error
+	RunReports() error
 }
 
 type service struct {
@@ -43,6 +46,34 @@ var (
 	userStateCol documents.CollectionRef
 )
 
+func NewService(configurationProvider ConfigurationProvider, slackBotAPI *slack.Client) (Service, error) {
+	mod := &service{
+		configurationProvider: configurationProvider,
+		slackBotAPI:           slackBotAPI,
+	}
+
+	var err error
+	userStateCol, err = resources.NewCollection("userState", resources.CollectionWriting, resources.CollectionReading, resources.CollectionDeleting)
+	if err != nil {
+		return nil, err
+	}
+
+	err = resources.NewSchedule("sendReport", "30 minutes", func(ec *faas.EventContext, next faas.EventHandler) (*faas.EventContext, error) {
+		fmt.Println("Got scheduled event")
+
+		err := mod.RunReports()
+		if err != nil {
+			fmt.Println("RunReports returned an error ", err)
+		}
+		return next(ec)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return mod, nil
+}
+
 func (mod *service) postMessageToSlack(channel string, message string, params ...slack.MsgOption) {
 	_, _, err := mod.slackBotAPI.PostMessage(channel, append(params, slack.MsgOptionText(message, true))...)
 	if err != nil {
@@ -53,80 +84,23 @@ func (mod *service) postMessageToSlack(channel string, message string, params ..
 	}
 }
 
-func (mod *service) SendReportForTeam(tc *TeamConfig, sendTo string) {
-	attachments := []slack.Attachment{}
-	didNotDoReport := []string{}
-	outOfOffice := []string{}
+func (mod *service) SendReportForTeam(tc *TeamConfig, sendTo string) error {
+	today, err := common.ToDay(tc.Timezone)
+	if err != nil {
+		return err
+	}
+
+	if !strings.HasPrefix(sendTo, "@") && today == tc.LastSendDate {
+		// already been sent
+		return nil
+	}
 
 	members, err := mod.GetAllTeamMembers(tc.Name)
 	if err != nil {
-		fmt.Println(err)
-	}
-	today, err := common.ToDay(tc.Timezone)
-	if err != nil {
-		fmt.Println(err)
-		today = ""
+		return err
 	}
 
-	for _, member := range members {
-		answers := member.Answers
-		if len(answers) > 0 {
-			// don't keep reusing previous answers.
-			if member.LastAnswerDate != "" && member.LastAnswerDate != today {
-				answers = map[string]string{}
-			}
-		}
-
-		if member.OutOfOffice {
-			outOfOffice = append(outOfOffice, member.User)
-		} else if len(answers) == 0 {
-			didNotDoReport = append(didNotDoReport, "@"+member.User)
-		} else if member.Skipped {
-			attachment := slack.Attachment{
-				Color:      colorful.FastHappyColor().Hex(),
-				MarkdownIn: []string{"text", "pretext"},
-				Pretext:    "@" + member.User,
-				Text:       "Has nothing to declare.",
-			}
-			attachments = append(attachments, attachment)
-		} else {
-			message := ""
-			for idx, q := range tc.Questions {
-				message += q + "\n" + answers[q]
-
-				if idx < len(tc.Questions)-1 {
-					message += "\n\n"
-				}
-			}
-
-			attachment := slack.Attachment{
-				Color:      colorful.FastHappyColor().Hex(),
-				MarkdownIn: []string{"text", "pretext"},
-				Pretext:    "@" + member.User,
-				Text:       message,
-			}
-			attachments = append(attachments, attachment)
-		}
-	}
-
-	if len(outOfOffice) > 0 {
-		persons := outOfOffice[0]
-		verb := "is"
-
-		if len(outOfOffice) > 1 {
-			persons = strings.Join(outOfOffice[0:(len(outOfOffice)-2)], ", ") + " and " + outOfOffice[(len(outOfOffice)-1)]
-			verb = "are"
-		}
-
-		attachment := slack.Attachment{
-			Color:      colorful.FastHappyColor().Hex(),
-			MarkdownIn: []string{"text", "pretext"},
-			Pretext:    "Currently out of office",
-			Text:       persons + " " + verb + " currently out of office :sunglasses: :palm_tree:",
-		}
-
-		attachments = append(attachments, attachment)
-	}
+	attachments, didNotDoReport := tc.GenerateReport(today, members)
 
 	if tc.SplitReport {
 		mod.postMessageToSlack(sendTo, ":parrotcop: Alrighty! Here's the scrum report for today!", SlackParams)
@@ -141,34 +115,44 @@ func (mod *service) SendReportForTeam(tc *TeamConfig, sendTo string) {
 		mod.postMessageToSlack(sendTo, fmt.Sprintln("And lastly we should take a little time to shame", didNotDoReport), SlackParams)
 	}
 
+	if !strings.HasPrefix(sendTo, "@") {
+		tc.LastSendDate = today
+		mod.SaveTeamConfig(tc)
+	}
+
 	log.WithFields(log.Fields{
 		"team":    tc.Name,
 		"channel": tc.Channel,
 	}).Info("Sent scrum report.")
+
+	return nil
 }
 
-func NewService(configurationProvider ConfigurationProvider, slackBotAPI *slack.Client) Service {
-	mod := &service{
-		configurationProvider: configurationProvider,
-		slackBotAPI:           slackBotAPI,
+func (ss *service) RunReports() error {
+	errs := []error{}
+	for _, tc := range ss.configurationProvider.Config().Teams {
+		ready, err := tc.ReadyToSendReport()
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		fmt.Printf("team %s report ready:%v\n", tc.Name, ready)
+		if ready {
+			err = ss.SendReportForTeam(&tc, tc.Channel)
+			if err != nil {
+				errs = append(errs, err)
+			}
+		}
 	}
 
-	var err error
-	userStateCol, err = resources.NewCollection("userState", resources.CollectionWriting, resources.CollectionReading, resources.CollectionDeleting)
-	if err != nil {
-		panic(err)
+	if len(errs) > 0 {
+		msg := ""
+		for _, e := range errs {
+			msg += e.Error() + "\n"
+		}
+		return errors.New(msg)
 	}
-
-	configurationProvider.OnChange(func(cfg *Config) {
-		log.Println("Configuration File Changed refreshing state")
-		mod.SetReminders(cfg)
-	})
-
-	return mod
-}
-
-func (mod *service) SetReminders(config *Config) {
-	log.Info("Refreshing teams.")
+	return nil
 }
 
 func (m *service) GetTeamForUser(username string) *TeamConfig {
@@ -253,6 +237,16 @@ func (m *service) GetQuestionsForTeam(team string) []string {
 		return []string{}
 	}
 	return tc.Questions
+}
+
+func (m *service) SaveTeamConfig(tc *TeamConfig) error {
+	teamMap := map[string]interface{}{}
+	err := decodeWithJsonTags(tc, &teamMap)
+	if err != nil {
+		return err
+	}
+
+	return teamCol.Doc(tc.Name).Set(teamMap)
 }
 
 func (m *service) SaveUserState(us *UserState) error {

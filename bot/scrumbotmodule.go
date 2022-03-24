@@ -216,6 +216,11 @@ func (b *Bot) answerQuestions(event *slack.MessageEvent, us *scrum.UserState, tc
 			"user": us.User,
 			"team": tc.Name,
 		}).Info("All questions anwsered, entry saved.")
+
+		if err := b.scrum.RunReports(); err != nil {
+			b.logger.Error(err)
+		}
+
 		return false
 	}
 
